@@ -1,55 +1,13 @@
 from __future__ import annotations
 
-import csv
 import json
 import math
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 
 SID_BEGIN = "<|sid_begin|>"
 SID_END = "<|sid_end|>"
-
-
-@dataclass
-class Sample:
-    user_id: str
-    source_items: list[str]
-    target_items: list[str]
-    source_count: int
-    target_count: int
-
-    @property
-    def label_item(self) -> str | None:
-        return self.target_items[0] if self.target_items else None
-
-
-def split_pipe(value: str | None) -> list[str]:
-    if value is None:
-        return []
-    text = str(value).strip()
-    if not text:
-        return []
-    return [part for part in text.split("|") if part]
-
-
-def load_user_sequences(csv_path: str | Path) -> list[Sample]:
-    path = Path(csv_path)
-    rows: list[Sample] = []
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            rows.append(
-                Sample(
-                    user_id=row["user_id"],
-                    source_items=split_pipe(row.get("source_items")),
-                    target_items=split_pipe(row.get("target_items")),
-                    source_count=int(row["source_count"]),
-                    target_count=int(row["target_count"]),
-                )
-            )
-    return rows
 
 
 def iter_jsonl(path: str | Path) -> Iterable[dict[str, Any]]:

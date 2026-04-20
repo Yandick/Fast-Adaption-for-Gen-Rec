@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,7 @@ import pandas as pd
 import torch
 from transformers import AutoModel, AutoTokenizer
 
-from utils import load_meta_filtered, load_user_sequences
+from utils import load_meta_filtered
 
 
 def last_token_pool(last_hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -60,7 +61,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare item metadata and embedding inputs for tokenizer inference.",
     )
-    parser.add_argument("--user_sequences_csv", required=True)
+    parser.add_argument(
+        "--user_sequences_csv",
+        required=True,
+        help=(
+            "Raw interaction CSV with columns `user_id,parent_asin,rating,timestamp`. "
+            "This script only uses the unique `parent_asin` values."
+        ),
+    )
     parser.add_argument("--target_meta_path", required=True)
     parser.add_argument("--target_domain", required=True)
     parser.add_argument("--source_meta_paths", nargs="*", default=[])
@@ -75,11 +83,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_item_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
-    samples = load_user_sequences(args.user_sequences_csv)
+def load_unique_item_ids(csv_path: str | Path) -> set[str]:
+    path = Path(csv_path)
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
 
-    source_ids = {item for sample in samples for item in sample.source_items}
-    target_label_ids = {item for sample in samples for item in sample.target_items}
+        if "parent_asin" not in fieldnames:
+            raise ValueError(
+                "user_sequences_csv must contain a `parent_asin` column. "
+                "Expected raw interaction CSV with columns `user_id,parent_asin,rating,timestamp`.",
+            )
+
+        unique_item_ids: set[str] = set()
+        for row in reader:
+            item_id = str(row.get("parent_asin") or "").strip()
+            if item_id:
+                unique_item_ids.add(item_id)
+
+        if not unique_item_ids:
+            raise ValueError(f"No valid parent_asin values found in {path}.")
+
+        return unique_item_ids
+
+
+def collect_item_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
+    unique_item_ids = load_unique_item_ids(args.user_sequences_csv)
+    print(
+        f"[INFO] Loaded {len(unique_item_ids)} unique items from {args.user_sequences_csv}",
+    )
+    source_ids = unique_item_ids
+    target_filter_ids = unique_item_ids
 
     source_domain_names = args.source_domains
     if args.source_meta_paths and source_domain_names and len(args.source_meta_paths) != len(source_domain_names):
@@ -87,7 +121,7 @@ def collect_item_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
 
     items: dict[str, dict[str, Any]] = {}
 
-    keep_target_ids = None if args.target_item_scope == "all_meta" else target_label_ids
+    keep_target_ids = None if args.target_item_scope == "all_meta" else target_filter_ids
     target_items = load_meta_filtered(args.target_meta_path, args.target_domain, keep_target_ids)
     for item in target_items.values():
         item["is_target_candidate"] = True
@@ -99,7 +133,7 @@ def collect_item_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
         items.update(source_items)
 
     missing_source = source_ids.difference(items.keys())
-    missing_target = target_label_ids.difference(items.keys())
+    missing_target = target_filter_ids.difference(items.keys())
     if missing_source:
         print(f"[WARN] Missing metadata for {len(missing_source)} source items.")
     if missing_target:

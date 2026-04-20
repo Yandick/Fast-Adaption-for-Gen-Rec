@@ -16,9 +16,12 @@
 **Output format:** Parquet with columns `pid`, `codes`
 
 `s0.py`:
-- 从用户序列和商品 metadata 收集 item 文本，调用 embedding model 生成 item embedding。
--输入：user_sequences_csv、target/source metadata。
+- 从交互 CSV 和商品 metadata 收集 item 文本，调用 embedding model 生成 item embedding。
+- 输入：raw interaction CSV、target/source metadata。(raw interaction CSV来源：https://amazon-reviews-2023.github.io/data_processing/5core.html里Statistics的link)
 - 输出：item_metadata.parquet、item_embeddings.parquet。
+- `user_sequences_csv` 仅支持原始交互 CSV：`user_id,parent_asin,rating,timestamp`。
+- 脚本只使用 `parent_asin` 的全局去重集合来筛选需要处理的 item。
+- 当 `--target_item_scope labels_only` 时，会用这组去重后的 `parent_asin` 过滤 target meta。
 
 `s1.py`:
 - 把 metadata 和 tokenizer codes 合并，生成最终 item_id -> codes -> sid 映射。
